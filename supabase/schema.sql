@@ -8,6 +8,10 @@ create table if not exists public.plumb_sync (
 alter table public.plumb_sync
   add column if not exists revision bigint not null default 1;
 
+update public.plumb_sync
+set revision = 1
+where revision is null;
+
 -- The shared workspace intentionally uses a fixed UUID that is not a login user.
 -- Remove the auth-users foreign key so every authenticated account can read/write this one row.
 do $$

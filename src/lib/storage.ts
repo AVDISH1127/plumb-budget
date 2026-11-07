@@ -80,12 +80,44 @@ export const defaultCategories = (profileId: string): Category[] => [
 function migrate(value: unknown): PlumbData {
   if (!value || typeof value !== 'object') throw new Error('Saved Plumb data is not valid.')
   const data = value as Partial<PlumbData>
+  const profiles = (Array.isArray(data.profiles) ? data.profiles : []).filter((profile): profile is Profile =>
+    Boolean(profile && typeof profile === 'object' && typeof (profile as Profile).id === 'string'
+      && typeof (profile as Profile).name === 'string' && typeof (profile as Profile).createdAt === 'string'),
+  ).map(profile => ({
+    ...profile,
+    currency: typeof profile.currency === 'string' && profile.currency ? profile.currency : '₹',
+  }))
   const migrated: PlumbData = {
     schemaVersion: CURRENT_SCHEMA,
-    profiles: Array.isArray(data.profiles) ? data.profiles : [],
-    categories: Array.isArray(data.categories) ? data.categories : [],
-    entries: Array.isArray(data.entries) ? data.entries : [],
-    merchantRules: Array.isArray(data.merchantRules) ? data.merchantRules : [],
+    profiles,
+    categories: (Array.isArray(data.categories) ? data.categories : []).filter((category): category is Category =>
+      Boolean(category && typeof category === 'object' && typeof (category as Category).id === 'string'
+        && typeof (category as Category).profileId === 'string' && typeof (category as Category).name === 'string'
+        && typeof (category as Category).monthlyBudget === 'number' && Number.isFinite((category as Category).monthlyBudget)
+        && typeof (category as Category).isFixed === 'boolean'),
+    ).map(category => ({ ...category, icon: typeof category.icon === 'string' ? category.icon : 'CircleEllipsis',
+      color: typeof category.color === 'string' ? category.color : '#94A3B8' })),
+    entries: (Array.isArray(data.entries) ? data.entries : []).filter((entry): entry is Entry =>
+      Boolean(entry && typeof entry === 'object' && typeof (entry as Entry).id === 'string'
+        && typeof (entry as Entry).profileId === 'string' && typeof (entry as Entry).amount === 'number'
+        && Number.isFinite((entry as Entry).amount) && typeof (entry as Entry).totalPaid === 'number'
+        && Number.isFinite((entry as Entry).totalPaid) && typeof (entry as Entry).date === 'string'),
+    ).map(entry => ({
+      ...entry,
+      note: typeof entry.note === 'string' ? entry.note : '',
+      tags: Array.isArray(entry.tags) ? entry.tags.filter(tag => typeof tag === 'string') : [],
+      createdAt: typeof entry.createdAt === 'string' ? entry.createdAt : entry.date,
+      source: ['manual', 'quick-add', 'upi-screenshot', 'bank-statement'].includes(entry.source) ? entry.source : 'manual',
+      type: entry.type === 'income' ? 'income' : 'expense',
+      isSplit: Boolean(entry.isSplit),
+      isFixed: Boolean(entry.isFixed),
+    })),
+    merchantRules: (Array.isArray(data.merchantRules) ? data.merchantRules : []).filter((rule): rule is MerchantRule =>
+      Boolean(rule && typeof rule === 'object' && typeof (rule as MerchantRule).id === 'string'
+        && typeof (rule as MerchantRule).profileId === 'string' && typeof (rule as MerchantRule).normalizedPattern === 'string'
+        && typeof (rule as MerchantRule).displayName === 'string' && typeof (rule as MerchantRule).categoryId === 'string'
+        && typeof (rule as MerchantRule).matchCount === 'number'),
+    ),
     activeProfileId: typeof data.activeProfileId === 'string' ? data.activeProfileId : null,
   }
   if (migrated.profiles.length === 0) {
