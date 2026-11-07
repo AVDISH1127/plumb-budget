@@ -8,6 +8,39 @@ export interface Profile {
   createdAt: string
   lastBackupAt?: string
   legacyJsonAmountsConverted?: boolean
+  idleLockMinutes?: number
+  biometricCredentialId?: string
+  budgetRolloverEnabled?: boolean
+}
+
+export interface ActivityItem {
+  id: string
+  profileId: string
+  action: 'create' | 'update' | 'delete' | 'import' | 'restore'
+  entity: 'entry' | 'category' | 'backup' | 'import'
+  summary: string
+  createdAt: string
+  undo?: unknown
+}
+
+export interface RecurringTransaction {
+  id: string
+  profileId: string
+  type: 'expense' | 'income'
+  amount: number
+  categoryId: string
+  note: string
+  dayOfMonth: number
+  enabled: boolean
+}
+
+export interface SavingsGoal {
+  id: string
+  profileId: string
+  name: string
+  targetAmount: number
+  savedAmount: number
+  deadline: string
 }
 
 export interface Category {
@@ -64,10 +97,13 @@ export interface PlumbData {
   entries: Entry[]
   merchantRules: MerchantRule[]
   activeProfileId: string | null
+  activity: ActivityItem[]
+  recurringTransactions: RecurringTransaction[]
+  savingsGoals: SavingsGoal[]
 }
 
 const STORAGE_KEY = 'plumb.data'
-const CURRENT_SCHEMA = 1
+export const CURRENT_SCHEMA = 2
 
 export const defaultCategories = (profileId: string): Category[] => [
   { id: crypto.randomUUID(), profileId, name: 'Food & dining', icon: 'Utensils', color: '#F59E0B', monthlyBudget: 8000, isFixed: false },
@@ -119,6 +155,15 @@ function migrate(value: unknown): PlumbData {
         && typeof (rule as MerchantRule).matchCount === 'number'),
     ),
     activeProfileId: typeof data.activeProfileId === 'string' ? data.activeProfileId : null,
+    activity: Array.isArray(data.activity) ? data.activity.filter((item): item is ActivityItem =>
+      Boolean(item && typeof item === 'object' && typeof item.id === 'string' && typeof item.profileId === 'string'
+        && typeof item.summary === 'string' && typeof item.createdAt === 'string')) : [],
+    recurringTransactions: Array.isArray(data.recurringTransactions) ? data.recurringTransactions.filter((item): item is RecurringTransaction =>
+      Boolean(item && typeof item === 'object' && typeof item.id === 'string' && typeof item.profileId === 'string'
+        && typeof item.amount === 'number' && Number.isFinite(item.amount) && typeof item.categoryId === 'string')) : [],
+    savingsGoals: Array.isArray(data.savingsGoals) ? data.savingsGoals.filter((item): item is SavingsGoal =>
+      Boolean(item && typeof item === 'object' && typeof item.id === 'string' && typeof item.profileId === 'string'
+        && typeof item.name === 'string' && typeof item.targetAmount === 'number' && Number.isFinite(item.targetAmount))) : [],
   }
   if (migrated.profiles.length === 0) {
     const profile: Profile = {
@@ -340,6 +385,9 @@ export async function importLegacyJsonBackup(file: File): Promise<PlumbData> {
     entries,
     merchantRules: [],
     activeProfileId: profileId,
+    activity: [],
+    recurringTransactions: [],
+    savingsGoals: [],
   }
 }
 

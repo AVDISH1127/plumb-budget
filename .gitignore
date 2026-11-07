@@ -8,3 +8,9 @@ dist/
 .wrangler.log
 *.zip
 *.tsbuildinfo
+.wrangler-home/
+.wrangler-log/
+.tools/
+
+.wrangler-home/
+.wrangler-log/

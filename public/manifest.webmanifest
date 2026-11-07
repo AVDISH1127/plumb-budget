@@ -12,6 +12,22 @@
   "background_color": "#081513",
   "theme_color": "#081513",
   "categories": ["finance", "productivity"],
+  "share_target": {
+    "action": "/share-target",
+    "method": "POST",
+    "enctype": "multipart/form-data",
+    "params": {
+      "title": "title",
+      "text": "text",
+      "url": "url",
+      "files": [
+        {
+          "name": "media",
+          "accept": ["image/*", "application/pdf"]
+        }
+      ]
+    }
+  },
   "icons": [
     {
       "src": "/icons/plumb-icon.svg",

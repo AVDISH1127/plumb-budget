@@ -1,4 +1,4 @@
-const CACHE_NAME = 'plumb-shell-v2'
+const CACHE_NAME = 'plumb-shell-v3'
 const APP_SHELL = [
   '/',
   '/manifest.webmanifest',
@@ -24,6 +24,26 @@ self.addEventListener('activate', event => {
         .map(key => caches.delete(key))))
       .then(() => self.clients.claim()),
   )
+})
+
+self.addEventListener('fetch', event => {
+  const url = new URL(event.request.url)
+  if (event.request.method === 'POST' && url.pathname === '/share-target') {
+    event.respondWith((async () => {
+      const data = await event.request.formData()
+      const file = data.get('media')
+      if (file instanceof Blob && typeof file.arrayBuffer === 'function') {
+        const cache = await caches.open(CACHE_NAME)
+        await cache.put('/__shared-file__', new Response(await file.arrayBuffer(), {
+          headers: {
+            'Content-Type': file.type || 'application/octet-stream',
+            'X-Plumb-File-Name': typeof file === 'object' && 'name' in file ? String(file.name) : '',
+          },
+        }))
+      }
+      return Response.redirect('/?shared=1', 303)
+    })())
+  }
 })
 
 self.addEventListener('fetch', event => {

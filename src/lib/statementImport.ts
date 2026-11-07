@@ -1,5 +1,20 @@
 import Papa from 'papaparse'
 
+export function parseSpreadsheetXml(xml: string): string {
+  const document = new DOMParser().parseFromString(xml, 'application/xml')
+  if (document.querySelector('parsererror')) throw new Error('The spreadsheet XML is not valid.')
+  return Array.from(document.getElementsByTagName('Row')).map(row => {
+    let columnIndex = 1
+    return Array.from(row.children).map(cell => {
+      const data = cell.getElementsByTagName('Data')[0]
+      const index = Number(cell.getAttribute('ss:Index') || columnIndex)
+      columnIndex = index + 1
+      const value = data?.textContent?.replace(/"/g, '""') ?? ''
+      return `"${value}"`
+    }).join(',')
+  }).join('\n')
+}
+
 export interface StatementReviewRow {
   id: string
   date: string

@@ -2,7 +2,7 @@ import { useEffect, useMemo, useRef, useState } from 'react'
 import type { User } from '@supabase/supabase-js'
 import {
   ArrowDownLeft, ArrowUpRight, ArrowUpRightFromSquare, CalendarDays, Check, ChevronDown, Cloud, Download,
-  CircleHelp, CreditCard, Eye, EyeOff, FileDown, FileUp, Filter, IndianRupee, LockKeyhole,
+  CircleHelp, CreditCard, Eye, EyeOff, FileDown, FileUp, Filter, Fingerprint, IndianRupee, LockKeyhole,
   LogOut, MoreHorizontal, Pencil, Plus, RefreshCw, Search, Settings2, ShieldCheck, Sparkles, Target, Trash2,
   TrendingDown, TrendingUp, Users, Wallet, X,
 } from 'lucide-react'
@@ -20,7 +20,7 @@ import type { BudgetSuggestion } from './lib/overviewTools'
 import type { Category, Entry, PlumbData, Profile } from './lib/storage'
 import { canonicalData, fetchRemoteData, getSupabaseClient, syncBaselineKey, uploadRemoteData } from './lib/supabase'
 import type { PlumbSupabaseClient } from './lib/supabase'
-import { parseCsvStatement, parsePdfStatement } from './lib/statementImport'
+import { parseCsvStatement, parsePdfStatement, parseSpreadsheetXml } from './lib/statementImport'
 import type { StatementReview } from './lib/statementImport'
 
 type Modal = 'expense' | 'income' | 'profile' | 'pin' | 'security' | 'import' | 'backup' | 'restore' | 'settings' | 'sync' | 'install' | 'more' | 'report' | null
@@ -109,6 +109,46 @@ function App() {
       setError(cause instanceof Error ? cause.message : 'Unable to load local Plumb data.')
     }
   }, [])
+
+  useEffect(() => {
+    if (new URLSearchParams(window.location.search).get('shared') !== '1') return
+    void caches.open('plumb-shell-v3').then(async cache => {
+      const response = await cache.match('/__shared-file__')
+      if (!response) {
+        setMessage('The shared file was received, but could not be read.')
+        return
+      }
+      const sharedFile = await response.blob()
+      const type = sharedFile.type
+      const name = response.headers.get('X-Plumb-File-Name') || (type === 'application/pdf' ? 'shared-statement.pdf' : 'shared-payment.png')
+      if (type === 'application/pdf' || name.toLowerCase().endsWith('.pdf')) {
+        setModal('import')
+      } else if (type.startsWith('image/')) {
+        setMessage('Shared payment image received. Choose Payment screenshot in Import to review it.')
+        setModal('import')
+      } else {
+        setMessage('The shared file type is not supported. Choose a PDF, image, CSV, or Excel statement.')
+      }
+      await cache.delete('/__shared-file__')
+      window.history.replaceState({}, '', window.location.pathname)
+    }).catch(() => setMessage('The shared file could not be opened.'))
+  }, [])
+
+  useEffect(() => {
+    if (!profile || !profile.idleLockMinutes || !profile.pinHash || locked) return
+    let timer = 0
+    const resetTimer = () => {
+      window.clearTimeout(timer)
+      timer = window.setTimeout(() => setLocked(true), profile.idleLockMinutes! * 60_000)
+    }
+    const events = ['pointerdown', 'keydown', 'touchstart'] as const
+    events.forEach(event => window.addEventListener(event, resetTimer, { passive: true }))
+    resetTimer()
+    return () => {
+      window.clearTimeout(timer)
+      events.forEach(event => window.removeEventListener(event, resetTimer))
+    }
+  }, [profile?.id, profile?.idleLockMinutes, profile?.pinHash, locked])
 
   useEffect(() => {
     try {
@@ -748,6 +788,32 @@ function App() {
       setBusy(false)
     }
   }
+  const unlockProfileWithBiometric = async () => {
+    if (!profile?.biometricCredentialId || !window.PublicKeyCredential) {
+      setMessage('Biometric unlock has not been set up for this profile.')
+      return
+    }
+    setBusy(true)
+    try {
+      const normalizedId = profile.biometricCredentialId.replace(/-/g, '+').replace(/_/g, '/')
+      const credentialId = Uint8Array.from(atob(normalizedId.padEnd(Math.ceil(normalizedId.length / 4) * 4, '=')), char => char.charCodeAt(0))
+      await navigator.credentials.get({
+        publicKey: {
+          challenge: crypto.getRandomValues(new Uint8Array(32)),
+          allowCredentials: [{ type: 'public-key', id: credentialId, transports: ['internal'] }],
+          userVerification: 'required',
+          timeout: 60_000,
+        },
+      })
+      if (data) persist({ ...data, activeProfileId: profile.id })
+      setLocked(false)
+      setModal(null)
+    } catch (cause) {
+      setMessage(cause instanceof Error ? cause.message : 'Biometric unlock could not verify this device.')
+    } finally {
+      setBusy(false)
+    }
+  }
   const enableProfilePin = async () => {
     if (!data || !profile) return
     if (!/^\d{4}$/.test(form.pin)) {
@@ -772,6 +838,45 @@ function App() {
       setMessage('PIN protection is enabled for this profile.')
     } catch (cause) {
       setMessage(cause instanceof Error ? cause.message : 'Could not protect this profile with a PIN.')
+    } finally {
+      setBusy(false)
+    }
+  }
+  const setIdleLockMinutes = (minutes: number) => {
+    if (!data || !profile) return
+    try {
+      persist({ ...data, profiles: data.profiles.map(item => item.id === profile.id ? { ...item, idleLockMinutes: minutes } : item) })
+      setMessage(minutes ? `Auto-lock set to ${minutes} minutes.` : 'Auto-lock disabled.')
+    } catch (cause) {
+      setMessage(cause instanceof Error ? cause.message : 'Could not save the auto-lock setting.')
+    }
+  }
+  const enableBiometricUnlock = async () => {
+    if (!data || !profile || !window.PublicKeyCredential) {
+      setMessage('Biometric unlock is not supported by this browser.')
+      return
+    }
+    setBusy(true)
+    try {
+      const credential = await navigator.credentials.create({
+        publicKey: {
+          challenge: crypto.getRandomValues(new Uint8Array(32)),
+          rp: { name: 'Plumb' },
+          user: {
+            id: new TextEncoder().encode(profile.id),
+            name: `${profile.id}@plumb.local`,
+            displayName: profile.name,
+          },
+          pubKeyCredParams: [{ type: 'public-key', alg: -7 }, { type: 'public-key', alg: -257 }],
+          authenticatorSelection: { authenticatorAttachment: 'platform', userVerification: 'required' },
+          timeout: 60_000,
+        },
+      })
+      if (!(credential instanceof PublicKeyCredential)) throw new Error('Biometric setup was not completed.')
+      persist({ ...data, profiles: data.profiles.map(item => item.id === profile.id ? { ...item, biometricCredentialId: credential.id } : item) })
+      setMessage('Biometric unlock enabled for this profile.')
+    } catch (cause) {
+      setMessage(cause instanceof Error ? cause.message : 'Biometric unlock could not be enabled.')
     } finally {
       setBusy(false)
     }
@@ -829,7 +934,9 @@ function App() {
         }
       } else {
         const merchantRules = Object.fromEntries(data.merchantRules.filter(rule => rule.profileId === profile.id).map(rule => [rule.normalizedPattern, categories.find(category => category.id === rule.categoryId)?.name || 'Other']))
-        review = await parseCsvStatement(await file.text(), data.entries.filter(entry => entry.profileId === profile.id), merchantRules)
+        const text = await file.text()
+        const csv = /\.xml$/i.test(file.name) || /<Workbook/i.test(text) ? parseSpreadsheetXml(text) : text
+        review = await parseCsvStatement(csv, data.entries.filter(entry => entry.profileId === profile.id), merchantRules)
       }
       if (!review.rows.length) throw new Error('No transaction table was found. Download the statement as a PDF from your bank app or website.')
       setStatementReview(review)
@@ -939,8 +1046,8 @@ function App() {
         ? await importLegacyJsonBackup(file)
         : await decryptBackup(file, form.passphrase)
       const confirmation = isLegacyJson
-        ? `Restore ${restored.entries.length} transactions from this JSON backup? This replaces all profiles and data currently saved in this browser.`
-        : 'Replace all Plumb profiles and data with this backup?'
+        ? `Restore preview\n\nProfiles: ${restored.profiles.length}\nTransactions: ${restored.entries.length}\nCategories: ${restored.categories.length}\nMerchant rules: ${restored.merchantRules.length}\n\nThis backup replaces the current browser data. Continue?`
+        : `Restore preview\n\nProfiles: ${restored.profiles.length}\nTransactions: ${restored.entries.length}\nCategories: ${restored.categories.length}\nMerchant rules: ${restored.merchantRules.length}\n\nThis backup replaces the current browser data. Continue?`
       if (!window.confirm(confirmation)) return
       persist(restored)
       setActiveProfileId(restored.activeProfileId)
@@ -1155,8 +1262,15 @@ function App() {
           <span className="field-label">SWITCH PROFILE</span><div className="profile-options">{data.profiles.map(item => <button className={`profile-option ${item.id === activeProfileId ? 'current' : ''}`} onClick={() => void switchProfile(item.id)} key={item.id}><span className="avatar">{item.name.slice(0, 1).toUpperCase()}</span><span><strong>{item.name}</strong><small>{item.pinHash ? 'PIN protected' : 'No PIN'}{item.id === activeProfileId ? ' · Current' : ''}</small></span>{item.pinHash ? <LockKeyhole size={15} /> : item.id === activeProfileId ? <Check size={16} /> : null}</button>)}</div>
           <div className="divider" /><label className="field"><span>NEW PROFILE NAME</span><input placeholder="e.g. Shared home" value={form.name} onChange={event => setForm({ ...form, name: event.target.value })} /></label><label className="field"><span>4-DIGIT PIN <i>OPTIONAL</i></span><input inputMode="numeric" type="password" maxLength={4} placeholder="Leave blank for no PIN" value={form.pin} onChange={event => setForm({ ...form, pin: event.target.value.replace(/\D/g, '').slice(0, 4) })} /></label><button className="primary-button wide" onClick={() => void createProfile()}>Create profile <Plus size={16} /></button>
         </div>}
-        {modal === 'pin' && <div className="modal-body"><div className="pin-lock"><LockKeyhole size={24} /></div><p className="modal-copy">Enter your 4-digit PIN to unlock <strong>{profile.name}</strong>.</p><label className="field"><span>PROFILE PIN</span><input autoFocus inputMode="numeric" type="password" maxLength={4} placeholder="••••" value={form.pin} onChange={event => setForm({ ...form, pin: event.target.value.replace(/\D/g, '').slice(0, 4) })} onKeyDown={event => { if (event.key === 'Enter') void unlockProfile() }} /></label><button disabled={busy || form.pin.length !== 4} className="primary-button wide" onClick={() => void unlockProfile()}>{busy ? 'Checking…' : 'Unlock profile'} <LockKeyhole size={15} /></button><button className="subtle-button" onClick={() => { setForm(current => ({ ...current, pin: '', confirmPin: '' })); setModal('profile') }}><LogOut size={14} /> Switch profile</button></div>}
-        {modal === 'security' && <div className="modal-body"><div className="security-note"><ShieldCheck size={18} /><span>A four-digit PIN adds a lock screen on this device. It protects access to this profile, not the browser’s local storage.</span></div><label className="field"><span>NEW 4-DIGIT PIN</span><input autoFocus inputMode="numeric" type="password" maxLength={4} placeholder="Choose a PIN" value={form.pin} onChange={event => setForm({ ...form, pin: event.target.value.replace(/\D/g, '').slice(0, 4) })} /></label><label className="field"><span>CONFIRM PIN</span><input inputMode="numeric" type="password" maxLength={4} placeholder="Enter it again" value={form.confirmPin} onChange={event => setForm({ ...form, confirmPin: event.target.value.replace(/\D/g, '').slice(0, 4) })} onKeyDown={event => { if (event.key === 'Enter') void enableProfilePin() }} /></label><button disabled={busy || form.pin.length !== 4 || form.confirmPin.length !== 4} className="primary-button wide" onClick={() => void enableProfilePin()}>{busy ? 'Saving…' : 'Enable PIN protection'} <LockKeyhole size={15} /></button></div>}
+        {modal === 'pin' && <div className="modal-body"><div className="pin-lock"><LockKeyhole size={24} /></div><p className="modal-copy">Enter your 4-digit PIN to unlock <strong>{profile.name}</strong>.</p><label className="field"><span>PROFILE PIN</span><input autoFocus inputMode="numeric" type="password" maxLength={4} placeholder="••••" value={form.pin} onChange={event => setForm({ ...form, pin: event.target.value.replace(/\D/g, '').slice(0, 4) })} onKeyDown={event => { if (event.key === 'Enter') void unlockProfile() }} /></label><button disabled={busy || form.pin.length !== 4} className="primary-button wide" onClick={() => void unlockProfile()}>{busy ? 'Checking…' : 'Unlock profile'} <LockKeyhole size={15} /></button>{profile.biometricCredentialId && <button disabled={busy} className="secondary-button wide" onClick={() => void unlockProfileWithBiometric()}><Fingerprint size={16} /> Unlock with biometrics</button>}<button className="subtle-button" onClick={() => { setForm(current => ({ ...current, pin: '', confirmPin: '' })); setModal('profile') }}><LogOut size={14} /> Switch profile</button></div>}
+        {modal === 'security' && <div className="modal-body">
+          <div className="security-note"><ShieldCheck size={18} /><span>A four-digit PIN locks this profile. Switching profiles always requires that profile's unlock.</span></div>
+          <label className="field"><span>NEW 4-DIGIT PIN</span><input autoFocus inputMode="numeric" type="password" maxLength={4} placeholder="Choose a PIN" value={form.pin} onChange={event => setForm({ ...form, pin: event.target.value.replace(/\D/g, '').slice(0, 4) })} /></label>
+          <label className="field"><span>CONFIRM PIN</span><input inputMode="numeric" type="password" maxLength={4} placeholder="Enter it again" value={form.confirmPin} onChange={event => setForm({ ...form, confirmPin: event.target.value.replace(/\D/g, '').slice(0, 4) })} onKeyDown={event => { if (event.key === 'Enter') void enableProfilePin() }} /></label>
+          <button disabled={busy || form.pin.length !== 4 || form.confirmPin.length !== 4} className="primary-button wide" onClick={() => void enableProfilePin()}>{busy ? 'Saving…' : 'Enable PIN protection'} <LockKeyhole size={15} /></button>
+          <label className="field"><span>AUTO-LOCK AFTER INACTIVITY</span><select value={profile?.idleLockMinutes ?? 0} onChange={event => setIdleLockMinutes(Number(event.target.value))}><option value={0}>Never</option><option value={1}>1 minute</option><option value={5}>5 minutes</option><option value={15}>15 minutes</option><option value={30}>30 minutes</option></select></label>
+          {window.PublicKeyCredential && <button type="button" disabled={busy} className="secondary-button wide" onClick={() => void enableBiometricUnlock()}>Enable biometric unlock <Fingerprint size={16} /></button>}
+        </div>}
         {modal === 'sync' && <div className="modal-body">
           <div className="security-note"><Cloud size={18} /><span>Sync is optional. Your local data remains available, but a copy is stored in your Supabase account and is readable by that account. Your Plumb PIN is not cloud encryption.</span></div>
           {syncRecovery ? <div className="sync-auth"><label className="field"><span>NEW PASSWORD</span><input autoComplete="new-password" type="password" value={syncNewPassword} onChange={event => setSyncNewPassword(event.target.value)} placeholder="At least 6 characters" /></label><button disabled={busy || syncNewPassword.length < 6} className="primary-button wide" onClick={() => void updateRecoveredPassword()}>Save new password</button><button className="subtle-button" type="button" onClick={() => { setSyncRecovery(false); setSyncNewPassword('') }}>Cancel password recovery</button></div>
@@ -1192,7 +1306,7 @@ function App() {
           <button type="button" onClick={() => { setSyncStatus(''); setModal('sync') }}><Cloud size={17} /><span><strong>Sync across devices</strong><small>Copy your data to another device with Supabase.</small></span><ArrowUpRight size={14} /></button>
           {!isInstalled && <button type="button" onClick={() => void installApp()}><Download size={17} /><span><strong>Install Plumb</strong><small>Add Plumb to your phone home screen.</small></span><ArrowUpRight size={14} /></button>}
         </div>}
-        {modal === 'import' && <div className="modal-body"><p className="modal-copy">Import bank statement data locally. CSV, TSV, and text-layer PDF files are supported; transactions are reviewed locally before anything is saved.</p><button className="upload-drop" onClick={() => uploadRef.current?.click()}><FileUp size={21} /><strong>Choose a statement file</strong><span>CSV, TSV, or PDF · processed on your device</span></button><input ref={uploadRef} className="hidden-input" type="file" accept=".csv,.tsv,.pdf,text/csv,text/tab-separated-values,application/pdf" onChange={event => { const file = event.target.files?.[0]; if (file) void importStatement(file) }} /><div className="import-divider"><span>OR</span></div><button className="upload-drop" onClick={() => ocrRef.current?.click()}><Sparkles size={21} /><strong>Read a UPI payment screenshot</strong><span>GPay, PhonePe, Paytm, BHIM · OCR runs on-device</span></button><input ref={ocrRef} className="hidden-input" type="file" accept="image/*" onChange={event => { const file = event.target.files?.[0]; if (file) void importScreenshot(file) }} /><p className="hint">Expected statement columns include date, description or narration, amount or debit/credit, and optionally UTR/reference.</p></div>}
+        {modal === 'import' && <div className="modal-body"><p className="modal-copy">Import bank statement data locally. CSV, TSV, SpreadsheetML XML, and text-layer PDF files are supported; transactions are reviewed locally before anything is saved.</p><button className="upload-drop" onClick={() => uploadRef.current?.click()}><FileUp size={21} /><strong>Choose a statement file</strong><span>CSV, TSV, XML spreadsheet, or PDF · processed on your device</span></button><input ref={uploadRef} className="hidden-input" type="file" accept=".csv,.tsv,.xml,.pdf,text/csv,text/tab-separated-values,application/xml,text/xml,application/pdf" onChange={event => { const file = event.target.files?.[0]; if (file) void importStatement(file) }} /><div className="import-divider"><span>OR</span></div><button className="upload-drop" onClick={() => ocrRef.current?.click()}><Sparkles size={21} /><strong>Read a UPI payment screenshot</strong><span>GPay, PhonePe, Paytm, BHIM · OCR runs on-device</span></button><input ref={ocrRef} className="hidden-input" type="file" accept="image/*" onChange={event => { const file = event.target.files?.[0]; if (file) void importScreenshot(file) }} /><p className="hint">Expected statement columns include date, description or narration, amount or debit/credit, and optionally UTR/reference.</p></div>}
         {modal === 'backup' && <div className="modal-body"><div className="security-note"><ShieldCheck size={18} /><span>Your backup is encrypted with AES-GCM. Plumb cannot recover a forgotten passphrase.</span></div><label className="field"><span>BACKUP PASSPHRASE</span><input type="password" autoComplete="new-password" placeholder="Use a strong passphrase" value={form.passphrase} onChange={event => setForm({ ...form, passphrase: event.target.value })} /></label><button disabled={busy || form.passphrase.length < 8} className="primary-button wide" onClick={() => void exportBackup()}>{busy ? 'Encrypting…' : 'Download encrypted backup'} <FileDown size={16} /></button><p className="hint">Use at least 8 characters. Keep the passphrase somewhere safe.</p></div>}
         {modal === 'restore' && <div className="modal-body"><div className="security-note"><ShieldCheck size={18} /><span>Restore replaces all profiles and data currently saved in this browser. Version 1 JSON backups are imported without a passphrase; encrypted .plumb backups still need their passphrase.</span></div><label className="field"><span>BACKUP PASSPHRASE <i>FOR .PLUMB FILES</i></span><input type="password" autoComplete="current-password" placeholder="Not needed for JSON backups" value={form.passphrase} onChange={event => setForm({ ...form, passphrase: event.target.value })} /></label><button className="upload-drop" disabled={busy} onClick={() => uploadRef.current?.click()}><FileUp size={21} /><strong>{busy ? 'Restoring…' : 'Choose a JSON or .plumb backup'}</strong><span>Version 1 JSON and encrypted Plumb backups</span></button><input ref={uploadRef} className="hidden-input" type="file" accept=".json,.plumb,application/json,application/octet-stream" onChange={event => { const file = event.target.files?.[0]; if (file) void restoreBackup(file); event.target.value = '' }} /></div>}
         {modal === 'settings' && <div className="modal-body"><p className="modal-copy">Set a monthly income goal and give each category a comfortable spending limit.</p><label className="field"><span>MONTHLY INCOME GOAL <i>OPTIONAL</i></span><input type="number" min="0" placeholder="e.g. 50000" value={form.monthlyGoal} onChange={event => setForm({ ...form, monthlyGoal: event.target.value })} /></label><span className="field-label">CATEGORY BUDGETS</span>{categories.map(category => <label className="budget-edit-row" key={category.id}><span><i style={{ background: category.color }} />{category.name}</span><span className="budget-edit-input"><IndianRupee size={13} /><input type="number" min="0" value={budgetDraft[category.id] ?? ''} onChange={event => setBudgetDraft({ ...budgetDraft, [category.id]: event.target.value })} /></span></label>)}<button className="primary-button wide" onClick={saveSettings}>Save budgets <Check size={15} /></button><button type="button" className="subtle-button" onClick={openReport}><FileDown size={14} /> Export a report</button></div>}
