@@ -1,0 +1,35 @@
+{
+  "name": "plumb-budget",
+  "private": true,
+  "version": "1.0.0",
+  "type": "module",
+  "scripts": {
+    "dev": "vite",
+    "build": "tsc -b && vite build",
+    "preview": "vite preview",
+    "test": "node --test",
+    "deploy:cloudflare": "npm run build && npx --yes wrangler@latest deploy"
+  },
+  "dependencies": {
+    "@supabase/supabase-js": "^2.118.0",
+    "@tesseract.js-data/eng": "^1.0.0",
+    "lucide-react": "^0.468.0",
+    "papaparse": "^5.4.1",
+    "pdf-lib": "^1.17.1",
+    "pdfjs-dist": "4.10.38",
+    "react": "^18.3.1",
+    "react-dom": "^18.3.1",
+    "tesseract.js": "^5.1.1"
+  },
+  "devDependencies": {
+    "@tailwindcss/postcss": "^4.3.3",
+    "@types/papaparse": "^5.3.15",
+    "@types/react": "^18.3.18",
+    "@types/react-dom": "^18.3.5",
+    "@vitejs/plugin-react": "^4.3.4",
+    "postcss": "^8.5.31",
+    "tailwindcss": "^4.3.3",
+    "typescript": "~5.6.2",
+    "vite": "^6.0.5"
+  }
+}
