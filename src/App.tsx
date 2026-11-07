@@ -18,7 +18,7 @@ import type { ReportOptions, ReportPeriod, ReportSection } from './lib/reporting
 import { getBudgetSuggestions, getSpendingCalendar, parseQuickAdd } from './lib/overviewTools'
 import type { BudgetSuggestion } from './lib/overviewTools'
 import type { Category, Entry, PlumbData, Profile } from './lib/storage'
-import { canonicalData, fetchRemoteData, getSupabaseClient, saveSupabaseConfig, syncBaselineKey, uploadRemoteData } from './lib/supabase'
+import { canonicalData, fetchRemoteData, getSupabaseClient, syncBaselineKey, uploadRemoteData } from './lib/supabase'
 import type { PlumbSupabaseClient } from './lib/supabase'
 import { parseCsvStatement, parsePdfStatement } from './lib/statementImport'
 import type { StatementReview } from './lib/statementImport'
@@ -66,8 +66,6 @@ function App() {
   const [locked, setLocked] = useState(false)
   const [editingEntryId, setEditingEntryId] = useState<string | null>(null)
   const [supabaseClient, setSupabaseClient] = useState<PlumbSupabaseClient | null>(null)
-  const [supabaseProjectUrl, setSupabaseProjectUrl] = useState('')
-  const [supabaseAnonKey, setSupabaseAnonKey] = useState('')
   const [installPrompt, setInstallPrompt] = useState<InstallPromptEvent | null>(null)
   const [isInstalled, setIsInstalled] = useState(false)
   const [syncUser, setSyncUser] = useState<User | null>(null)
@@ -177,16 +175,6 @@ function App() {
   const persist = (next: PlumbData) => {
     saveData(next)
     setData(next)
-  }
-  const saveSupabaseSettings = () => {
-    try {
-      saveSupabaseConfig(supabaseProjectUrl, supabaseAnonKey)
-      setSupabaseClient(getSupabaseClient())
-      setSupabaseAnonKey('')
-      setSyncStatus('Supabase project saved on this device. Configure the same project on your phone.')
-    } catch (cause) {
-      setSyncStatus(cause instanceof Error ? cause.message : 'Could not save Supabase settings.')
-    }
   }
   const uploadLocalSnapshot = async (snapshot: PlumbData, expectedRevision?: number) => {
     if (!supabaseClient || !syncUser) throw new Error('Sign in to Supabase before syncing.')
@@ -309,7 +297,7 @@ function App() {
 
   const authenticateSync = async (register: boolean) => {
     if (!supabaseClient) {
-      setSyncStatus('Set your Supabase project URL and publishable/anon key first.')
+      setSyncStatus('The Supabase connection is not ready yet.')
       return
     }
     if (!syncEmail.trim() || !syncPassword) {
@@ -1171,12 +1159,6 @@ function App() {
         {modal === 'security' && <div className="modal-body"><div className="security-note"><ShieldCheck size={18} /><span>A four-digit PIN adds a lock screen on this device. It protects access to this profile, not the browser’s local storage.</span></div><label className="field"><span>NEW 4-DIGIT PIN</span><input autoFocus inputMode="numeric" type="password" maxLength={4} placeholder="Choose a PIN" value={form.pin} onChange={event => setForm({ ...form, pin: event.target.value.replace(/\D/g, '').slice(0, 4) })} /></label><label className="field"><span>CONFIRM PIN</span><input inputMode="numeric" type="password" maxLength={4} placeholder="Enter it again" value={form.confirmPin} onChange={event => setForm({ ...form, confirmPin: event.target.value.replace(/\D/g, '').slice(0, 4) })} onKeyDown={event => { if (event.key === 'Enter') void enableProfilePin() }} /></label><button disabled={busy || form.pin.length !== 4 || form.confirmPin.length !== 4} className="primary-button wide" onClick={() => void enableProfilePin()}>{busy ? 'Saving…' : 'Enable PIN protection'} <LockKeyhole size={15} /></button></div>}
         {modal === 'sync' && <div className="modal-body">
           <div className="security-note"><Cloud size={18} /><span>Sync is optional. Your local data remains available, but a copy is stored in your Supabase account and is readable by that account. Your Plumb PIN is not cloud encryption.</span></div>
-          {!supabaseClient && <form className="sync-config-form" onSubmit={event => { event.preventDefault(); saveSupabaseSettings() }}>
-            <div className="sync-setup"><strong>Connect a Supabase project</strong><span>Run <code>supabase/schema.sql</code> in your Supabase SQL Editor and allow this app URL under Authentication → URL Configuration → Redirect URLs. Use a publishable/anon key only—never a service-role or secret key. Enter the same project details on your phone.</span></div>
-            <label className="field"><span>SUPABASE PROJECT URL</span><input type="url" autoComplete="url" value={supabaseProjectUrl} onChange={event => setSupabaseProjectUrl(event.target.value)} placeholder="https://your-project.supabase.co" /></label>
-            <label className="field"><span>PUBLISHABLE / ANON KEY</span><input type="text" autoComplete="off" spellCheck={false} value={supabaseAnonKey} onChange={event => setSupabaseAnonKey(event.target.value)} placeholder="sb_publishable_… or anon JWT" /></label>
-            <button disabled={!supabaseProjectUrl.trim() || !supabaseAnonKey.trim()} className="primary-button wide" type="submit">Save project settings <Check size={15} /></button>
-          </form>}
           {syncRecovery ? <div className="sync-auth"><label className="field"><span>NEW PASSWORD</span><input autoComplete="new-password" type="password" value={syncNewPassword} onChange={event => setSyncNewPassword(event.target.value)} placeholder="At least 6 characters" /></label><button disabled={busy || syncNewPassword.length < 6} className="primary-button wide" onClick={() => void updateRecoveredPassword()}>Save new password</button><button className="subtle-button" type="button" onClick={() => { setSyncRecovery(false); setSyncNewPassword('') }}>Cancel password recovery</button></div>
           : syncUser ? <>
             <div className="sync-account"><span><strong>Signed in</strong><small>{syncUser.email}</small></span><button className="subtle-button" disabled={busy} onClick={() => void signOutSync()}><LogOut size={14} /> Sign out</button></div>

@@ -33,6 +33,10 @@ const envConfig = {
   url: import.meta.env.VITE_SUPABASE_URL?.trim() ?? '',
   anonKey: import.meta.env.VITE_SUPABASE_ANON_KEY?.trim() ?? '',
 }
+const defaultConfig = {
+  url: 'https://qbvkzwhcqarwfnekcomr.supabase.co',
+  anonKey: 'sb_publishable_-RewGMOvC6KaW8xL9s9Ttg_V6_9qghL',
+}
 
 const validSupabaseUrl = (value: string | undefined) => {
   if (!value) return false
@@ -73,7 +77,7 @@ export function saveSupabaseConfig(url: string, anonKey: string) {
 function readSupabaseConfig(): SupabaseConfig | null {
   if (validSupabaseUrl(envConfig.url) && validPublishableKey(envConfig.anonKey)) return envConfig
   const raw = localStorage.getItem(CONFIG_STORAGE_KEY)
-  if (!raw) return null
+  if (!raw) return validSupabaseUrl(defaultConfig.url) && validPublishableKey(defaultConfig.anonKey) ? defaultConfig : null
   let value: unknown
   try {
     value = JSON.parse(raw) as unknown
