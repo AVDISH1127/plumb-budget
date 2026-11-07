@@ -1299,7 +1299,7 @@ function App() {
           <p className="hint">Your data remains stored on this device unless you separately turn on Supabase sync.</p>
         </div>}
         {modal === 'more' && <div className="modal-body more-options">
-          <button type="button" onClick={() => setModal('import')}><FileUp size={17} /><span><strong>Import bank statement</strong><small>Upload a CSV, TSV, or PDF bank statement.</small></span><ArrowUpRight size={14} /></button>
+          <button type="button" onClick={() => setModal('import')}><FileUp size={17} /><span><strong>Import bank statement</strong><small>Upload a CSV, TSV, XML, or PDF bank statement.</small></span><ArrowUpRight size={14} /></button>
           <button type="button" onClick={() => { setForm(current => ({ ...current, passphrase: '' })); setModal('backup') }}><FileDown size={17} /><span><strong>Encrypted backup</strong><small>Save a protected copy of your Plumb data.</small></span><ArrowUpRight size={14} /></button>
           <button type="button" onClick={openReport}><FileDown size={17} /><span><strong>Export a report</strong><small>Filter transactions and save a CSV or PDF.</small></span><ArrowUpRight size={14} /></button>
           <button type="button" onClick={() => { setForm(current => ({ ...current, passphrase: '' })); setModal('restore') }}><FileUp size={17} /><span><strong>Restore backup</strong><small>Load a JSON or encrypted Plumb backup.</small></span><ArrowUpRight size={14} /></button>
