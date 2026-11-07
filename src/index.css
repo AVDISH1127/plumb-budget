@@ -207,6 +207,10 @@ h1, h2, p { margin-top: 0; }
 .quick-entry-input { display: flex; align-items: center; gap: 8px; min-width: 0; flex: 1; padding: 0 11px; color: var(--mint); background: rgba(255,255,255,.025); border: 1px solid var(--line); border-radius: 6px; }
 .quick-entry-input input { width: 100%; min-width: 0; padding: 10px 0; color: var(--text); background: transparent; border: 0; outline: 0; font-size: 11px; }
 .quick-entry-input input::placeholder { color: #64786f; }
+.quick-entry-mic { display: grid; flex: 0 0 38px; place-items: center; width: 38px; height: 38px; align-self: center; border: 1px solid var(--line); border-radius: 6px; background: rgba(255,255,255,.025); color: var(--muted); cursor: pointer; }
+.quick-entry-mic:hover, .quick-entry-mic:focus-visible { border-color: rgba(52,211,153,.45); color: var(--mint); outline: none; }
+.quick-entry-mic.is-listening { border-color: var(--coral); background: rgba(248,113,113,.12); color: var(--coral); animation: mic-pulse 1.25s ease-in-out infinite; }
+@keyframes mic-pulse { 50% { box-shadow: 0 0 0 4px rgba(248,113,113,.08); } }
 .quick-entry-form .primary-button { flex: 0 0 auto; padding: 9px 13px; }
 .quick-entry-hint { color: var(--subtle); font-size: 9px; }
 .spending-calendar-panel { min-height: 0; margin-top: 14px; padding-bottom: 16px; }

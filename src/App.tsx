@@ -3,7 +3,7 @@ import type { User } from '@supabase/supabase-js'
 import {
   ArrowDownLeft, ArrowUpRight, ArrowUpRightFromSquare, CalendarDays, Check, ChevronDown, Cloud, Download,
   CircleHelp, CreditCard, Eye, EyeOff, FileDown, FileUp, Filter, Fingerprint, IndianRupee, LockKeyhole,
-  LogOut, MoreHorizontal, Pencil, Plus, RefreshCw, Search, Settings2, ShieldCheck, Sparkles, Target, Trash2,
+  LogOut, Mic, MoreHorizontal, Pencil, Plus, RefreshCw, Search, Settings2, ShieldCheck, Sparkles, Target, Trash2,
   TrendingDown, TrendingUp, Users, Wallet, X,
 } from 'lucide-react'
 import {
@@ -30,6 +30,30 @@ interface InstallPromptEvent extends Event {
   prompt: () => Promise<void>
   userChoice: Promise<{ outcome: 'accepted' | 'dismissed'; platform: string }>
 }
+
+interface SpeechRecognitionResultLike {
+  readonly length: number
+  readonly isFinal: boolean
+  [index: number]: { readonly transcript: string }
+}
+
+interface SpeechRecognitionEventLike {
+  readonly resultIndex: number
+  readonly results: ArrayLike<SpeechRecognitionResultLike>
+}
+
+interface SpeechRecognitionLike {
+  lang: string
+  continuous: boolean
+  interimResults: boolean
+  onresult: ((event: SpeechRecognitionEventLike) => void) | null
+  onerror: ((event: { error: string }) => void) | null
+  onend: (() => void) | null
+  start: () => void
+  stop: () => void
+}
+
+type SpeechRecognitionConstructor = new () => SpeechRecognitionLike
 
 const money = (amount: number, hidden: boolean) => hidden
   ? '₹•••••'
@@ -84,6 +108,7 @@ function App() {
   const [reportOptions, setReportOptions] = useState<ReportOptions>(DEFAULT_REPORT_OPTIONS)
   const [reportProgress, setReportProgress] = useState('')
   const [quickAddValue, setQuickAddValue] = useState('')
+  const [quickAddListening, setQuickAddListening] = useState(false)
   const [selectedCalendarDate, setSelectedCalendarDate] = useState(today())
   const [budgetUndo, setBudgetUndo] = useState<{ categoryId: string; previousBudget: number; appliedBudget: number } | null>(null)
   const [statementReview, setStatementReview] = useState<StatementReview | null>(null)
@@ -93,6 +118,7 @@ function App() {
   const [budgetDraft, setBudgetDraft] = useState<Record<string, string>>({})
   const uploadRef = useRef<HTMLInputElement>(null)
   const ocrRef = useRef<HTMLInputElement>(null)
+  const speechRecognitionRef = useRef<SpeechRecognitionLike | null>(null)
   const profile = data?.profiles.find(item => item.id === activeProfileId) ?? null
   const categories = data?.categories.filter(item => item.profileId === activeProfileId) ?? []
   const allEntries = data?.entries.filter(item => item.profileId === activeProfileId) ?? []
@@ -704,6 +730,54 @@ function App() {
     if (saved) setQuickAddValue('')
   }
 
+  const toggleQuickAddMic = () => {
+    if (quickAddListening) {
+      speechRecognitionRef.current?.stop()
+      return
+    }
+
+    const speechWindow = window as Window & {
+      SpeechRecognition?: SpeechRecognitionConstructor
+      webkitSpeechRecognition?: SpeechRecognitionConstructor
+    }
+    const Recognition = speechWindow.SpeechRecognition ?? speechWindow.webkitSpeechRecognition
+    if (!Recognition) {
+      setMessage('Voice input is not supported by this browser. Type the transaction instead.')
+      return
+    }
+
+    const recognition = new Recognition()
+    recognition.lang = 'en-IN'
+    recognition.continuous = false
+    recognition.interimResults = false
+    recognition.onresult = event => {
+      let transcript = ''
+      for (let index = event.resultIndex; index < event.results.length; index += 1) {
+        transcript += event.results[index][0]?.transcript ?? ''
+      }
+      if (transcript.trim()) {
+        setQuickAddValue(current => `${current}${current.trim() ? ' ' : ''}${transcript.trim()}`)
+      }
+    }
+    recognition.onerror = event => {
+      const unavailable = event.error === 'not-allowed' || event.error === 'service-not-allowed'
+      setMessage(unavailable ? 'Microphone access was blocked. Allow it in browser settings to use voice input.' : 'Voice input could not hear that clearly. Try again or type the transaction.')
+      setQuickAddListening(false)
+    }
+    recognition.onend = () => setQuickAddListening(false)
+    speechRecognitionRef.current = recognition
+    try {
+      recognition.start()
+      setQuickAddListening(true)
+      setMessage('Listening… say an amount and note, such as “120 coffee”.')
+    } catch {
+      setMessage('Voice input could not start. Check microphone access and try again.')
+      setQuickAddListening(false)
+    }
+  }
+
+  useEffect(() => () => speechRecognitionRef.current?.stop(), [])
+
   const applyBudgetSuggestion = (suggestion: BudgetSuggestion) => {
     if (!data || !profile) return
     const category = categories.find(item => item.id === suggestion.categoryId)
@@ -1154,6 +1228,7 @@ function App() {
             <div className="quick-entry-heading"><strong>Quick add</strong><span>{monthlyInsight}</span></div>
             <form className="quick-entry-form" onSubmit={event => { event.preventDefault(); submitQuickAdd() }}>
               <label className="quick-entry-input"><IndianRupee size={16} /><input aria-label="Quick add transaction" value={quickAddValue} onChange={event => setQuickAddValue(event.target.value)} placeholder="₹120 coffee · Food & dining" /></label>
+              <button type="button" className={`quick-entry-mic${quickAddListening ? ' is-listening' : ''}`} onClick={toggleQuickAddMic} aria-label={quickAddListening ? 'Stop voice input' : 'Add transaction by voice'} title={quickAddListening ? 'Stop listening' : 'Use microphone'}><Mic size={17} /></button>
               <button type="submit" className="primary-button">Add entry <ArrowUpRight size={15} /></button>
             </form>
             <span className="quick-entry-hint">Enter an amount first, then a note and optional category. Use “income” for deposits.</span>
